@@ -17,7 +17,7 @@
 |--|--|
 | GovCERT.HK | https://www.govcert.gov.hk/en/ |
 | HKCERT | https://www.hkcert.org/security-bulletin/ |
-| Fortinet PSIRT | https://fortiguard.fortinet.com/psirt |
+| Fortinet PSIRT | https://www.fortiguard.com/psirt |
 | Palo Alto | https://security.paloaltonetworks.com/ |
 | Cisco PSIRT | https://sec.cloudapps.cisco.com/security/center/publicationListing.x |
 

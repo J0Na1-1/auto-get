@@ -14,7 +14,7 @@ OUTPUT_DIR = '/CloudNAS/AI'
 HK_UTC_OFFSET = 8
 HK_TZ = timezone(timedelta(hours=HK_UTC_OFFSET))
 NOW_HK = datetime.now(HK_TZ)
-TODAY_HK = NOW_HK.strftime('%Y-%m-%d')
+TODAY_HK = sys.argv[1] if len(sys.argv) > 1 else NOW_HK.strftime('%Y-%m-%d')
 HEADERS = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36'}
 
 def normalize_platform(text):
@@ -44,10 +44,13 @@ def should_skip(risk_level):
 
 def parse_date_hk(date_str):
     if not date_str: return None
-    formats = ['%d %B %Y','%d %b %Y','%Y-%m-%d','%b %d, %Y','%d/%m/%Y','%m/%d/%Y','%d %b %Y %H:%M:%S','%Y-%m-%d %H:%M:%S']
+    formats = ['%d-%B-%Y','%d %B %Y','%d %b %Y','%Y-%m-%d','%b %d, %Y','%d/%m/%Y','%m/%d/%Y','%d %b %Y %H:%M:%S','%Y-%m-%d %H:%M:%S','%d %b']
     for fmt in formats:
         try:
             dt = datetime.strptime(date_str.strip(), fmt)
+            # If year is 1900 (default for dates without year), set to current year
+            if dt.year == 1900:
+                dt = dt.replace(year=NOW_HK.year)
             return dt.replace(tzinfo=timezone.utc).astimezone(HK_TZ)
         except ValueError: continue
     return None
@@ -59,15 +62,21 @@ def is_today_hk(dt_hk):
 def crawl_govcert():
     results = []
     try:
-        resp = requests.get('https://www.govcert.gov.hk/en/', timeout=30, headers=HEADERS)
+        resp = requests.get('https://www.govcert.gov.hk/en/alerts.php', timeout=30, headers=HEADERS)
         soup = BeautifulSoup(resp.text, 'html.parser')
-        alerts = soup.find_all('a', href=re.compile(r'/en/alerts_detail\.php\?id=\d+'))
+        alerts = soup.find_all('a', href=re.compile(r'alerts_detail\.php\?id=\d+'))
         for alert in alerts[:10]:
             title = alert.text.strip()
-            link = 'https://www.govcert.gov.hk' + alert['href'] if alert['href'].startswith('/') else alert['href']
+            href = alert.get('href', '')
+            if href.startswith('http'):
+                link = href
+            elif href.startswith('/'):
+                link = 'https://www.govcert.gov.hk' + href
+            else:
+                link = 'https://www.govcert.gov.hk/en/' + href
             parent = alert.parent
             date_text = parent.get_text() if parent else ''
-            date_match = re.search(r'(\d{1,2}\s+\w+\s+\d{4})', date_text)
+            date_match = re.search(r'(\d{1,2}-\w+-\d{4}|\d{1,2}\s+\w+\s+\d{4})', date_text)
             pub_date = parse_date_hk(date_match.group(1)) if date_match else None
             if not is_today_hk(pub_date): continue
             detail = fetch_detail_govcert(link, title)
@@ -160,7 +169,7 @@ def fetch_detail_hkcert(url, title, risk_level):
 def crawl_fortinet():
     results = []
     try:
-        resp = requests.get('https://fortiguard.fortinet.com/psirt', timeout=30, headers=HEADERS)
+        resp = requests.get('https://www.fortiguard.com/psirt', timeout=30, headers=HEADERS)
         soup = BeautifulSoup(resp.text, 'html.parser')
         text = soup.get_text()
         advisories = re.findall(r'(FG-IR-26-\d+)\s+(CVE-\d{4}-\d+)', text)
@@ -185,7 +194,7 @@ def crawl_fortinet():
                 'Affected Product': affected[:500] if affected else '',
                 'Description': description,
                 'Workaround': 'Apply vendor patches from FortiGuard PSIRT',
-                'Related Link': 'https://fortiguard.fortinet.com/psirt',
+                'Related Link': 'https://www.fortiguard.com/psirt',
                 'CVE': cve, 'From': 'Fortinet'})
     except Exception as e:
         logger.error(f'Fortinet crawl error: {e}')
@@ -317,7 +326,7 @@ def write_xlsx(results):
     for i, width in enumerate(widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    filename = f'AlertNews{NOW_HK.strftime("%d%m%y")}.xlsx'
+    filename = f'AlertNews{datetime.strptime(TODAY_HK, "%Y-%m-%d").strftime("%d%m%y")}.xlsx'
     filepath = os.path.join(OUTPUT_DIR, filename)
     wb.save(filepath)
     logger.info(f'Output saved to {filepath}')
