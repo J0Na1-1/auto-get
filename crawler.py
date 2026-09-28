@@ -48,7 +48,6 @@ def parse_date_hk(date_str):
     for fmt in formats:
         try:
             dt = datetime.strptime(date_str.strip(), fmt)
-            # If year is 1900 (default for dates without year), set to current year
             if dt.year == 1900:
                 dt = dt.replace(year=NOW_HK.year)
             return dt.replace(tzinfo=timezone.utc).astimezone(HK_TZ)
@@ -117,54 +116,54 @@ def fetch_detail_govcert(url, title):
 def crawl_hkcert():
     results = []
     try:
-        resp = requests.get('https://www.hkcert.org/security-bulletin/', timeout=30, headers=HEADERS)
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        bullets = soup.find_all('div', class_='risky')
-        for bullet in bullets[:15]:
-            try:
-                risk_tag = bullet.find(class_='risk')
-                risk_level = risk_tag.text.strip() if risk_tag else 'Medium'
-                if should_skip(risk_level): continue
-                title_tag = bullet.find('a')
-                title = title_tag.text.strip() if title_tag else ''
-                link = title_tag['href'] if title_tag and title_tag.has_attr('href') else ''
-                if link and not link.startswith('http'):
-                    link = 'https://www.hkcert.org' + link
-                date_match = re.search(r'(Release Date|Last Update Date):\s*(\d{1,2}\s+\w+\s+\d{4})', bullet.get_text())
-                pub_date = parse_date_hk(date_match.group(2)) if date_match else None
-                if not is_today_hk(pub_date): continue
-                detail = fetch_detail_hkcert(link, title, risk_level) if link else None
-                if detail: results.append(detail)
-            except Exception as e:
-                logger.error(f'HKCERT bullet error: {e}')
-                continue
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, executable_path='/usr/bin/chromium')
+            page = browser.new_page()
+            page.goto('https://www.hkcert.org/security-bulletin/', timeout=30000)
+            time.sleep(5)
+            html = page.content()
+            links = re.findall(r'href=\"(/security-bulletin/[^\"]+)\"', html)
+            links = [l for l in links if not l.endswith('#main') and not l.startswith('/tc/')]
+            for link in links[:15]:
+                try:
+                    full_link = link if link.startswith('http') else 'https://www.hkcert.org' + link
+                    idx = html.find(link)
+                    if idx >= 0:
+                        surrounding = html[max(0, idx-300):idx+300]
+                        date_match = re.search(r'(Release Date|Last Update Date):\s*(\d{1,2}\s+\w+\s+\d{4})', surrounding)
+                        pub_date = parse_date_hk(date_match.group(2)) if date_match else None
+                    else:
+                        pub_date = None
+                    if not is_today_hk(pub_date): continue
+                    page.goto(full_link, timeout=30000)
+                    time.sleep(3)
+                    detail_html = page.content()
+                    detail_soup = BeautifulSoup(detail_html, 'html.parser')
+                    detail_text = detail_soup.get_text()
+                    title = link.split('/')[-1].replace('_', ' ').title()
+                    descm = re.search(r'Description\s*[:\n]\s*(.+?)(?=Impact|System|Solution|Vulnerability Identifier|Related Links|\Z)', detail_text, re.DOTALL)
+                    description = descm.group(1).strip()[:500] if descm else ''
+                    affm = re.search(r'System / Technologies affected\s*[:\n]\s*(.+?)(?=Impact|Solutions|Vulnerability Identifier|Related Links|\Z)', detail_text, re.DOTALL)
+                    affected = affm.group(1).strip() if affm else ''
+                    solm = re.search(r'Solutions?\s*[:\n]\s*(.+?)(?=Vulnerability Identifier|Related Links|\Z)', detail_text, re.DOTALL)
+                    workaround = solm.group(1).strip()[:500] if solm else ''
+                    cve_match = re.findall(r'CVE-\d{4}-\d{4,7}', detail_text)
+                    cve = '; '.join(cve_match)
+                    results.append({'Date': pub_date.strftime('%d %B %Y') if pub_date else '',
+                        'Risk level': 'Medium',
+                        'Platform': normalize_platform(affected) if affected else 'Unknown',
+                        'Affected Product': affected[:500] if affected else '',
+                        'Description': description if description else title,
+                        'Workaround': workaround if workaround else '',
+                        'Related Link': full_link, 'CVE': cve, 'From': 'HKCERT'})
+                except Exception as e:
+                    logger.error(f'HKCERT detail error: {e}')
+                    continue
+            browser.close()
     except Exception as e:
         logger.error(f'HKCERT crawl error: {e}')
     return results
-
-def fetch_detail_hkcert(url, title, risk_level):
-    try:
-        resp = requests.get(url, timeout=30, headers=HEADERS)
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        text = soup.get_text()
-        descm = re.search(r'Description\s*[:\n]\s*(.+?)(?=Impact|System|Solution|Vulnerability Identifier|Related Links|\Z)', text, re.DOTALL)
-        description = descm.group(1).strip()[:500] if descm else ''
-        affm = re.search(r'System / Technologies affected\s*[:\n]\s*(.+?)(?=Impact|Solutions|Vulnerability Identifier|Related Links|\Z)', text, re.DOTALL)
-        affected = affm.group(1).strip() if affm else ''
-        solm = re.search(r'Solutions?\s*[:\n]\s*(.+?)(?=Vulnerability Identifier|Related Links|\Z)', text, re.DOTALL)
-        workaround = solm.group(1).strip()[:500] if solm else ''
-        cve_match = re.findall(r'CVE-\d{4}-\d{4,7}', text)
-        cve = '; '.join(cve_match)
-        return {'Date': (title + ' - ' + description[:200]) if description else title,
-            'Risk level': risk_level,
-            'Platform': normalize_platform(affected) if affected else 'Unknown',
-            'Affected Product': affected[:500] if affected else '',
-            'Description': description if description else title,
-            'Workaround': workaround if workaround else '',
-            'Related Link': url, 'CVE': cve, 'From': 'HKCERT'}
-    except Exception as e:
-        logger.error(f'HKCERT detail error: {e}')
-        return None
 
 def crawl_fortinet():
     results = []
@@ -187,7 +186,7 @@ def crawl_fortinet():
             if should_skip(severity): continue
             desc_match = re.search(r'(?:Improper|NULL|Uncontrolled|Use of|Path traversal|XXE|SQL Injection|Command Injection|Buffer Overflow|Out-of-bounds|Deserialization|Race Condition|Resource Consumption|Cross-site Scripting|HTTP/2|TLS|Session|Certificate|Authorization|Authentication|Memory|Integer|Overflow|Injection|Bypass|Exposure|Misconfiguration)\s+(.+?)(?:CVE-|Published:|Severity)', context, re.DOTALL)
             description = desc_match.group(1).strip()[:300] if desc_match else title
-            prod_match = re.search(r'(FortiOS|FortiProxy|FortiAnalyzer|FortiManager|FortiSwitch|FortiAP|FortiWeb|FortiSIEM|FortiMail|FortiPortal|FortiSandbox|FortiClient|FortiAuthenticator|FortiDDoS|FortiExtender|FortiDeceptor|FortiNAC|FortiWLC|FortiConverter|FortiPresence|FortiVoice|FortiTester|FortiRecorder|FortiSOAR|FortiPAM|FortiProxy|FortiSwitchManager|FortiGate)\s[\d\.\s,]+', context)
+            prod_match = re.search(r'(FortiOS|FortiProxy|FortiAnalyzer|FortiManager|FortiSwitch|FortiAP|FortiWeb|FortiSIEM|FortiMail|FortiPortal|FortiSandbox|FortiClient|FortiAuthenticator|FortiDDoS|FortiExtender|FortiDeceiver|FortiNAC|FortiWLC|FortiConverter|FortiPresence|FortiVoice|FortiTester|FortiRecorder|FortiSOAR|FortiPAM|FortiProxy|FortiSwitchManager|FortiGate)\s[\d\.\s,]+', context)
             affected = prod_match.group(0).strip() if prod_match else ''
             results.append({'Date': date_match.group(1) if date_match else '',
                 'Risk level': severity, 'Platform': 'Forti',
@@ -231,34 +230,6 @@ def crawl_paloalto():
                             'Workaround': 'Apply vendor patches',
                             'Related Link': f'https://security.paloaltonetworks.com/{cve}',
                             'CVE': cve, 'From': 'Palo Alto'})
-        else:
-            resp = requests.get('https://security.paloaltonetworks.com/', timeout=30, headers=HEADERS)
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            rows = soup.find_all('tr')[1:]
-            for row in rows[:25]:
-                cells = row.find_all('td')
-                if len(cells) >= 6:
-                    cve = cells[0].text.strip()
-                    summary = cells[1].text.strip()[:300]
-                    published = cells[5].text.strip()
-                    pub_date = parse_date_hk(published)
-                    if not is_today_hk(pub_date): continue
-                    cvss_text = cells[0].get('aria-label', '')
-                    severity = 'Medium'
-                    cvss_match = re.search(r'(\d+\.?\d*)', cvss_text)
-                    if cvss_match:
-                        cvss = float(cvss_match.group(1))
-                        if cvss >= 9.0: severity = 'Critical'
-                        elif cvss >= 7.0: severity = 'High'
-                        elif cvss >= 4.0: severity = 'Medium'
-                    if should_skip(severity): continue
-                    results.append({'Date': published, 'Risk level': severity,
-                        'Platform': 'Palo Alto',
-                        'Affected Product': summary[:200],
-                        'Description': summary,
-                        'Workaround': 'Apply vendor patches',
-                        'Related Link': f'https://security.paloaltonetworks.com/{cve}',
-                        'CVE': cve, 'From': 'Palo Alto'})
     except Exception as e:
         logger.error(f'Palo Alto crawl error: {e}')
     return results
@@ -266,38 +237,31 @@ def crawl_paloalto():
 def crawl_cisco():
     results = []
     try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, executable_path='/usr/bin/chromium')
-            page = browser.new_page()
-            page.goto('https://sec.cloudapps.cisco.com/security/center/publicationListing.x?product=Cisco&sort=-day_sir&limit=50#~Vulnerabilities', timeout=60000)
-            time.sleep(5)
-            content = page.content()
-            soup = BeautifulSoup(content, 'html.parser')
-            rows = soup.find_all('tr')[1:]
-            for row in rows[:25]:
-                cells = row.find_all('td')
-                if len(cells) >= 4:
-                    advisory = cells[0].text.strip() if cells[0] else ''
-                    impact = cells[1].text.strip() if len(cells) > 1 else ''
-                    cve = cells[2].text.strip() if len(cells) > 2 else ''
-                    updated = cells[3].text.strip() if len(cells) > 3 else ''
-                    pub_date = parse_date_hk(updated)
-                    if not is_today_hk(pub_date): continue
-                    severity = 'Medium'
-                    if 'critical' in impact.lower(): severity = 'Critical'
-                    elif 'high' in impact.lower(): severity = 'High'
-                    elif 'medium' in impact.lower(): severity = 'Medium'
-                    elif 'low' in impact.lower(): severity = 'Low'
-                    if should_skip(severity): continue
-                    results.append({'Date': updated, 'Risk level': severity,
-                        'Platform': 'Cisco',
-                        'Affected Product': advisory[:200],
-                        'Description': advisory,
-                        'Workaround': 'Apply vendor patches from Cisco PSIRT',
-                        'Related Link': 'https://sec.cloudapps.cisco.com/security/center/publicationListing.x',
-                        'CVE': cve, 'From': 'Cisco'})
-            browser.close()
+        url = 'https://sec.cloudapps.cisco.com/security/center/publicationService.x?criteria=exact&cves=&keyword=&last_published_date=&limit=50&offset=0&publicationTypeIDs=1,3&securityImpactRatings=&sort=-day_sir&title='
+        resp = requests.get(url, timeout=30, headers=HEADERS)
+        if resp.status_code == 200 and len(resp.text) > 0:
+            data = resp.json()
+            for adv in data[:20]:
+                published = adv.get('lastPublished', '')
+                pub_date = parse_date_hk(published[:10] if published else '') if published else None
+                if not is_today_hk(pub_date): continue
+                severity = adv.get('severity', 'Medium')
+                if severity.lower() == 'critical': severity = 'Critical'
+                elif severity.lower() == 'high': severity = 'High'
+                elif severity.lower() == 'medium': severity = 'Medium'
+                elif severity.lower() == 'low': severity = 'Low'
+                else: severity = 'Medium'
+                if should_skip(severity): continue
+                cve = adv.get('cve', '')
+                title = adv.get('title', '')
+                results.append({'Date': pub_date.strftime('%d %B %Y') if pub_date else (published[:10] if published else ''),
+                    'Risk level': severity,
+                    'Platform': 'Cisco',
+                    'Affected Product': title[:200],
+                    'Description': title,
+                    'Workaround': 'Apply vendor patches from Cisco PSIRT',
+                    'Related Link': adv.get('url', ''),
+                    'CVE': cve, 'From': 'Cisco'})
     except Exception as e:
         logger.error(f'Cisco crawl error: {e}')
     return results
@@ -326,7 +290,7 @@ def write_xlsx(results):
     for i, width in enumerate(widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    filename = f'AlertNews{datetime.strptime(TODAY_HK, "%Y-%m-%d").strftime("%d%m%y")}.xlsx'
+    filename = f'AlertNews{datetime.strptime(TODAY_HK, '%Y-%m-%d').strftime('%d%m%y')}.xlsx'
     filepath = os.path.join(OUTPUT_DIR, filename)
     wb.save(filepath)
     logger.info(f'Output saved to {filepath}')
