@@ -120,26 +120,26 @@ def crawl_hkcert():
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, executable_path='/usr/bin/chromium')
             page = browser.new_page()
-            page.goto('https://www.hkcert.org/security-bulletin/', timeout=30000)
-            time.sleep(5)
-            html = page.content()
-            links = re.findall(r'href=\"(/security-bulletin/[^\"]+)\"', html)
-            links = [l for l in links if not l.endswith('#main') and not l.startswith('/tc/')]
-            for link in links[:15]:
+            all_links = set()
+            # Scrape all pages
+            for page_num in range(1, 10):
+                url = f'https://www.hkcert.org/security-bulletin/' if page_num == 1 else f'https://www.hkcert.org/security-bulletin/?page={page_num}'
+                page.goto(url, timeout=30000)
+                time.sleep(5)
+                html = page.content()
+                links = re.findall(r'href=\"(/security-bulletin/[^\"]+)\"', html)
+                links = [l for l in links if not l.endswith('#main') and not l.startswith('/tc/')]
+                new_links = [l for l in links if l not in all_links]
+                if not new_links:
+                    break
+                all_links.update(new_links)
+            for link in list(all_links)[:30]:
                 try:
                     full_link = link if link.startswith('http') else 'https://www.hkcert.org' + link
-                    # Try to extract date from surrounding HTML first
-                    idx = html.find(link)
                     pub_date = None
-                    if idx >= 0:
-                        surrounding = html[max(0, idx-300):idx+300]
-                        date_match = re.search(r'(Release Date|Last Update Date):\s*(\d{1,2}\s+\w+\s+\d{4})', surrounding)
-                        pub_date = parse_date_hk(date_match.group(2)) if date_match else None
-                    # If no date found in HTML, try to extract from URL (e.g., ..._20260924)
-                    if pub_date is None:
-                        url_date_match = re.search(r'_(\d{8})$', link)
-                        if url_date_match:
-                            pub_date = parse_date_hk(url_date_match.group(1)[:4] + '-' + url_date_match.group(1)[4:6] + '-' + url_date_match.group(1)[6:])
+                    url_date_match = re.search(r'_(\d{8})$', link)
+                    if url_date_match:
+                        pub_date = parse_date_hk(url_date_match.group(1)[:4] + '-' + url_date_match.group(1)[4:6] + '-' + url_date_match.group(1)[6:])
                     if not is_today_hk(pub_date): continue
                     page.goto(full_link, timeout=30000)
                     time.sleep(5)
@@ -147,7 +147,6 @@ def crawl_hkcert():
                     detail_soup = BeautifulSoup(detail_html, 'html.parser')
                     detail_text = detail_soup.get_text()
                     title = link.split('/')[-1].replace('_', ' ').title()
-                    # Try to get description from meta tag first
                     desc_meta = detail_soup.find('meta', attrs={'name': 'description'})
                     description = desc_meta.get('content', '').strip() if desc_meta else ''
                     if not description:
@@ -155,7 +154,6 @@ def crawl_hkcert():
                         description = descm.group(1).strip()[:500] if descm else ''
                     affm = re.search(r'System / Technologies affected\s*(.+?)(?=Impact|Solutions?|Vulnerability Identifier|Related Links|\Z)', detail_text, re.DOTALL)
                     affected = affm.group(1).strip() if affm else ''
-                    # Clean up affected: remove duplicate version ranges
                     affected = re.sub(r'(Wordpress\s+[\d.]+\s*-\s*[\d.]+)(?=.*\1)', r'\1', affected)
                     solm = re.search(r'Solutions?\s*(.+?)(?=Vulnerability Identifier|Related Links|\Z)', detail_text, re.DOTALL)
                     workaround = solm.group(1).strip()[:500] if solm else ''
