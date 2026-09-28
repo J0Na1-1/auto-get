@@ -153,36 +153,43 @@ def crawl_hkcert():
             page = browser.new_page()
             all_links = set()
             link_dates = {}  # Store dates for each link
-            # Scrape all pages
-            for page_num in range(1, 10):
+            # Scrape all pages (limit to 5 pages for speed)
+            for page_num in range(1, 6):
                 url = f'https://www.hkcert.org/security-bulletin/' if page_num == 1 else f'https://www.hkcert.org/security-bulletin/?page={page_num}'
                 page.goto(url, timeout=30000)
-                time.sleep(5)
+                time.sleep(3)
                 html = page.content()
-                links = re.findall(r'href=\"(/security-bulletin/[^\"]+)\"', html)
+                links = re.findall(r'href="(/security-bulletin/[^"]+)"', html)
                 links = [l for l in links if not l.endswith('#main') and not l.startswith('/tc/')]
                 new_links = [l for l in links if l not in all_links]
                 if not new_links:
                     break
                 all_links.update(new_links)
-                # Extract dates for new links from URL first
-                for link in new_links:
-                    pub_date = None
-                    url_date_match = re.search(r'_(\d{8})$', link)
-                    if url_date_match:
-                        pub_date = parse_date_hk(url_date_match.group(1)[:4] + '-' + url_date_match.group(1)[4:6] + '-' + url_date_match.group(1)[6:])
-                    link_dates[link] = pub_date
+            # Extract dates from URL first
+            for link in all_links:
+                pub_date = None
+                url_date_match = re.search(r'_(\d{8})$', link)
+                if url_date_match:
+                    pub_date = parse_date_hk(url_date_match.group(1)[:4] + '-' + url_date_match.group(1)[4:6] + '-' + url_date_match.group(1)[6:])
+                link_dates[link] = pub_date
             for link in list(all_links):
                 try:
                     full_link = link if link.startswith('http') else 'https://www.hkcert.org' + link
-                    pub_date = link_dates.get(link)
-                    if not is_today_hk(pub_date): continue
                     page.goto(full_link, timeout=30000)
                     time.sleep(5)
                     detail_html = page.content()
                     detail_soup = BeautifulSoup(detail_html, 'html.parser')
                     detail_text = detail_soup.get_text()
                     title = link.split('/')[-1].replace('_', ' ').title()
+                    # Extract Release Date from the page
+                    pub_date = None
+                    rd_match = re.search(r'Release Date:\s*(\d{1,2}\s+\w+\s+\d{4})', detail_text)
+                    if rd_match:
+                        pub_date = parse_date_hk(rd_match.group(1))
+                    # Also check URL date as fallback
+                    if not pub_date:
+                        pub_date = link_dates.get(link)
+                    if not is_today_hk(pub_date): continue
                     desc_meta = detail_soup.find('meta', attrs={'name': 'description'})
                     description = desc_meta.get('content', '').strip() if desc_meta else ''
                     if not description:
@@ -190,7 +197,7 @@ def crawl_hkcert():
                         description = descm.group(1).strip()[:500] if descm else ''
                     affm = re.search(r'System / Technologies affected\s*(.+?)(?=Impact|Solutions?|Vulnerability Identifier|Related Links|\Z)', detail_text, re.DOTALL)
                     affected = affm.group(1).strip() if affm else ''
-                    affected = re.sub(r'(Wordpress\s+[\d.]+\s*-\s*[\d.]+)(?=.*\1)', r'\1', affected)
+                    affected = re.sub(r'(Wordpress\s+[\d.]+\s*-\s*[\d.]+)(?=.*)', r'', affected)
                     solm = re.search(r'Solutions?\s*(.+?)(?=Vulnerability Identifier|Related Links|\Z)', detail_text, re.DOTALL)
                     workaround = solm.group(1).strip()[:500] if solm else ''
                     # Extract platform from affected text (e.g., "BIND version 9.11.0" → "BIND")
@@ -214,6 +221,7 @@ def crawl_hkcert():
     except Exception as e:
         logger.error(f'HKCERT crawl error: {e}')
     return results
+
 
 def crawl_fortinet():
     results = []
