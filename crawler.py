@@ -70,7 +70,7 @@ def extract_risk_level(title):
 def extract_platform(description):
     if not description: return 'Unknown'
     d = description.lower()
-    # Extract platform from description text
+    if 'citrix' in d: return 'Citrix'
     if 'f5' in d: return 'F5'
     if 'cisco' in d: return 'Cisco'
     if 'microsoft' in d or 'windows' in d: return 'Microsoft'
