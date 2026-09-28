@@ -193,11 +193,16 @@ def crawl_hkcert():
                     affected = re.sub(r'(Wordpress\s+[\d.]+\s*-\s*[\d.]+)(?=.*\1)', r'\1', affected)
                     solm = re.search(r'Solutions?\s*(.+?)(?=Vulnerability Identifier|Related Links|\Z)', detail_text, re.DOTALL)
                     workaround = solm.group(1).strip()[:500] if solm else ''
+                    # Extract platform from affected text (e.g., "BIND version 9.11.0" → "BIND")
+                    platform = extract_platform(description) if description else 'Unknown'
+                    if platform == 'Unknown' and affected:
+                        afm = re.search(r'(\w+)\s+version', affected, re.I)
+                        if afm: platform = afm.group(1)
                     cve_match = re.findall(r'CVE-\d{4}-\d{4,7}', detail_text)
                     cve = '\n'.join(cve_match)
                     results.append({'Date': pub_date.strftime('%d %B %Y') if pub_date else '',
                         'Risk level': extract_risk_level(title),
-                        'Platform': extract_platform(description) if description else 'Unknown',
+                        'Platform': platform,
                         'Affected Product': affected[:500] if affected else '',
                         'Description': title if title else description,
                         'Workaround': workaround if workaround else '',
@@ -301,13 +306,30 @@ def crawl_cisco():
                 if isinstance(cve, str) and ',' in cve:
                     cve = '\n'.join(cve.split(','))
                 title = adv.get('title', '')
+                detail_url = adv.get('url', '')
+                # Fetch workaround from detail page
+                workaround = 'Apply vendor patches from Cisco PSIRT'
+                if detail_url:
+                    try:
+                        dresp = requests.get(detail_url, timeout=15, headers=HEADERS)
+                        if dresp.status_code == 200:
+                            dsoup = BeautifulSoup(dresp.text, 'html.parser')
+                            dtext = dsoup.get_text()
+                            wkm = re.search(r'Workarounds?\s*(.+?)(?=Caution|References|Related Links|\Z)', dtext, re.DOTALL)
+                            if wkm:
+                                wk_text = wkm.group(1).strip()[:500]
+                                # Filter out raw HTML fragments
+                                if 'no workarounds' not in wk_text.lower() and len(wk_text) > 20 and 'cisco bug ids' not in wk_text.lower():
+                                    workaround = wk_text
+                    except Exception:
+                        pass
                 results.append({'Date': pub_date.strftime('%d %B %Y') if pub_date else (published[:10] if published else ''),
                     'Risk level': severity,
                     'Platform': 'Cisco',
                     'Affected Product': title[:200],
                     'Description': title,
-                    'Workaround': 'Apply vendor patches from Cisco PSIRT',
-                    'Related Link': adv.get('url', ''),
+                    'Workaround': workaround,
+                    'Related Link': detail_url,
                     'CVE': cve, 'From': 'Cisco'})
     except Exception as e:
         logger.error(f'Cisco crawl error: {e}')
