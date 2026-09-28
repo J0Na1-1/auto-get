@@ -153,8 +153,8 @@ def crawl_hkcert():
             page = browser.new_page()
             all_links = set()
             link_dates = {}  # Store dates for each link
-            # Scrape all pages (limit to 5 pages for speed)
-            for page_num in range(1, 6):
+            # Scrape all pages (limit to 3 pages for speed)
+            for page_num in range(1, 4):
                 url = f'https://www.hkcert.org/security-bulletin/' if page_num == 1 else f'https://www.hkcert.org/security-bulletin/?page={page_num}'
                 page.goto(url, timeout=30000)
                 time.sleep(3)
