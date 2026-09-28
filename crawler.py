@@ -274,7 +274,7 @@ def write_xlsx(results):
     header_fill = PatternFill(start_color='0ea5e9', end_color='0ea5e9', fill_type='solid')
     header_align = Alignment(horizontal='center', vertical='center')
     thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-    headers = ['Risk level', 'Platform', 'Affected Product', 'Description', 'Related Link', 'Workaround', 'CVE', 'HKCert', 'Date']
+    headers = ['Date', 'Risk level', 'Platform', 'Affected Product', 'Description', 'Workaround', 'Related Link', 'CVE', 'From']
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=header)
         cell.font = header_font
