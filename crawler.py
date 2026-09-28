@@ -58,6 +58,37 @@ def is_today_hk(dt_hk):
     if dt_hk is None: return False
     return dt_hk.strftime('%Y-%m-%d') == TODAY_HK
 
+def extract_risk_level(title):
+    if not title: return 'Medium'
+    t = title.lower()
+    if 'critical' in t: return 'Critical'
+    if 'high' in t: return 'High'
+    if 'medium' in t: return 'Medium'
+    if 'low' in t: return 'Low'
+    return 'Medium'
+
+def extract_platform(description):
+    if not description: return 'Unknown'
+    d = description.lower()
+    # Extract platform from description text
+    if 'f5' in d: return 'F5'
+    if 'cisco' in d: return 'Cisco'
+    if 'microsoft' in d or 'windows' in d: return 'Microsoft'
+    if 'google' in d or 'chrome' in d: return 'Google'
+    if 'mozilla' in d or 'firefox' in d: return 'Mozilla'
+    if 'apple' in d or 'macos' in d or 'iphone' in d: return 'Apple'
+    if 'adobe' in d: return 'Adobe'
+    if 'oracle' in d: return 'Oracle'
+    if 'vmware' in d: return 'VMware'
+    if 'wordpress' in d: return 'WordPress'
+    if 'fortinet' in d or 'fortios' in d or 'forti' in d: return 'Forti'
+    if 'palo alto' in d: return 'Palo Alto'
+    if 'red hat' in d: return 'Red Hat'
+    if 'suse' in d: return 'SUSE'
+    if 'ubuntu' in d: return 'Ubuntu'
+    if 'debian' in d: return 'Debian'
+    return 'Unknown'
+
 def crawl_govcert():
     results = []
     try:
@@ -103,10 +134,10 @@ def fetch_detail_govcert(url, title):
         skip_tags = ['PHP','Edge','Google','Chrome','Cisco','Firefox','Mozilla','Windows','Windows Server','Microsoft Office','Apple','iPod','Visual Studio','VMware','Internet Explorer','Microsoft 365 Apps','Android','F5','Acrobat','Acrobat Reader','Adobe Reader','Word','Previous']
         platform_tags = [a.text.strip() for a in tags if a.text.strip() not in skip_tags]
         platform = '; '.join(platform_tags) if platform_tags else affected
-        return {'Date': pub_date, 'Risk level': 'Medium',
-            'Platform': normalize_platform(platform) if platform else 'Unknown',
+        return {'Date': pub_date, 'Risk level': extract_risk_level(title),
+            'Platform': extract_platform(description) if description else 'Unknown',
             'Affected Product': affected[:500] if affected else '',
-            'Description': (title + ' - ' + description) if description else title,
+            'Description': title,
             'Workaround': recommendation[:500] if recommendation else '',
             'Related Link': url, 'CVE': cve, 'From': 'GovCERT'}
     except Exception as e:
@@ -165,10 +196,10 @@ def crawl_hkcert():
                     cve_match = re.findall(r'CVE-\d{4}-\d{4,7}', detail_text)
                     cve = '\n'.join(cve_match)
                     results.append({'Date': pub_date.strftime('%d %B %Y') if pub_date else '',
-                        'Risk level': 'Medium',
-                        'Platform': normalize_platform(affected) if affected else 'Unknown',
+                        'Risk level': extract_risk_level(title),
+                        'Platform': extract_platform(description) if description else 'Unknown',
                         'Affected Product': affected[:500] if affected else '',
-                        'Description': description if description else title,
+                        'Description': title if title else description,
                         'Workaround': workaround if workaround else '',
                         'Related Link': full_link, 'CVE': cve, 'From': 'HKCERT'})
                 except Exception as e:
@@ -205,7 +236,7 @@ def crawl_fortinet():
             results.append({'Date': date_match.group(1) if date_match else '',
                 'Risk level': severity, 'Platform': 'Forti',
                 'Affected Product': affected[:500] if affected else '',
-                'Description': description,
+                'Description': title,
                 'Workaround': 'Apply vendor patches from FortiGuard PSIRT',
                 'Related Link': 'https://www.fortiguard.com/psirt',
                 'CVE': cve, 'From': 'Fortinet'})
