@@ -96,7 +96,7 @@ def fetch_detail_govcert(url, title):
         affm = re.search(r'Affected Systems:\s*(.+?)(?=Impact|Recommendation|More Information|\Z)', text, re.DOTALL)
         affected = affm.group(1).strip() if affm else ''
         recm = re.search(r'Recommendation:\s*(.+?)(?=More Information|\Z)', text, re.DOTALL)
-        recommendation = recm.group(1).strip() if recm else ''
+        recommendation = recm.group(1).strip()[:500] if recm else ''
         cve_links = soup.find_all('a', href=re.compile(r'cve\.mitre\.org'))
         cve = '; '.join([a.text.strip() for a in cve_links])
         tags = soup.find_all('a', href=re.compile(r'/en/alerts\.php\?tag='))
@@ -186,7 +186,7 @@ def crawl_fortinet():
             if should_skip(severity): continue
             desc_match = re.search(r'(?:Improper|NULL|Uncontrolled|Use of|Path traversal|XXE|SQL Injection|Command Injection|Buffer Overflow|Out-of-bounds|Deserialization|Race Condition|Resource Consumption|Cross-site Scripting|HTTP/2|TLS|Session|Certificate|Authorization|Authentication|Memory|Integer|Overflow|Injection|Bypass|Exposure|Misconfiguration)\s+(.+?)(?:CVE-|Published:|Severity)', context, re.DOTALL)
             description = desc_match.group(1).strip()[:300] if desc_match else title
-            prod_match = re.search(r'(FortiOS|FortiProxy|FortiAnalyzer|FortiManager|FortiSwitch|FortiAP|FortiWeb|FortiSIEM|FortiMail|FortiPortal|FortiSandbox|FortiClient|FortiAuthenticator|FortiDDoS|FortiExtender|FortiDeceiver|FortiNAC|FortiWLC|FortiConverter|FortiPresence|FortiVoice|FortiTester|FortiRecorder|FortiSOAR|FortiPAM|FortiProxy|FortiSwitchManager|FortiGate)\s[\d\.\s,]+', context)
+            prod_match = re.search(r'(FortiOS|FortiProxy|FortiAnalyzer|FortiManager|FortiSwitch|FortiAP|FortiWeb|FortiSIEM|FortiMail|FortiPortal|FortiSandbox|FortiClient|FortiAuthenticator|FortiDDoS|FortiExtender|FortiDeceiver|FortiNAC|FortiWLC|FortiConverter|FortiPresence|FortiVoice|FortiTester|FortiSOAR|FortiPAM|FortiProxy|FortiSwitchManager|FortiGate)\s[\d\.\s,]+', context)
             affected = prod_match.group(0).strip() if prod_match else ''
             results.append({'Date': date_match.group(1) if date_match else '',
                 'Risk level': severity, 'Platform': 'Forti',
@@ -274,7 +274,7 @@ def write_xlsx(results):
     header_fill = PatternFill(start_color='0ea5e9', end_color='0ea5e9', fill_type='solid')
     header_align = Alignment(horizontal='center', vertical='center')
     thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-    headers = ['Date', 'Risk level', 'Platform', 'Affected Product', 'Description', 'Workaround', 'Related Link', 'CVE', 'From']
+    headers = ['Risk level', 'Platform', 'Affected Product', 'Description', 'Related Link', 'Workaround', 'CVE', 'HKCert', 'Date']
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=header)
         cell.font = header_font
@@ -286,11 +286,11 @@ def write_xlsx(results):
             cell = ws.cell(row=row_idx, column=col_idx, value=item.get(key, ''))
             cell.border = thin_border
             cell.alignment = Alignment(vertical='top', wrap_text=True)
-    widths = [12, 12, 14, 30, 50, 40, 45, 30, 12]
+    widths = [12, 14, 30, 50, 45, 40, 30, 12, 12]
     for i, width in enumerate(widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    filename = f'AlertNews{datetime.strptime(TODAY_HK, '%Y-%m-%d').strftime('%d%m%y')}.xlsx'
+    filename = f'AlertNews{datetime.strptime(TODAY_HK, "%Y-%m-%d").strftime("%d%m%y")}.xlsx'
     filepath = os.path.join(OUTPUT_DIR, filename)
     wb.save(filepath)
     logger.info(f'Output saved to {filepath}')
