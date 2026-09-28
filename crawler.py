@@ -121,6 +121,7 @@ def crawl_hkcert():
             browser = p.chromium.launch(headless=True, executable_path='/usr/bin/chromium')
             page = browser.new_page()
             all_links = set()
+            link_dates = {}  # Store dates for each link
             # Scrape all pages
             for page_num in range(1, 10):
                 url = f'https://www.hkcert.org/security-bulletin/' if page_num == 1 else f'https://www.hkcert.org/security-bulletin/?page={page_num}'
@@ -133,13 +134,17 @@ def crawl_hkcert():
                 if not new_links:
                     break
                 all_links.update(new_links)
-            for link in list(all_links)[:30]:
-                try:
-                    full_link = link if link.startswith('http') else 'https://www.hkcert.org' + link
+                # Extract dates for new links from URL first
+                for link in new_links:
                     pub_date = None
                     url_date_match = re.search(r'_(\d{8})$', link)
                     if url_date_match:
                         pub_date = parse_date_hk(url_date_match.group(1)[:4] + '-' + url_date_match.group(1)[4:6] + '-' + url_date_match.group(1)[6:])
+                    link_dates[link] = pub_date
+            for link in list(all_links):
+                try:
+                    full_link = link if link.startswith('http') else 'https://www.hkcert.org' + link
+                    pub_date = link_dates.get(link)
                     if not is_today_hk(pub_date): continue
                     page.goto(full_link, timeout=30000)
                     time.sleep(5)
