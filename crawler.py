@@ -97,8 +97,8 @@ def fetch_detail_govcert(url, title):
         affected = affm.group(1).strip() if affm else ''
         recm = re.search(r'Recommendation:\s*(.+?)(?=More Information|\Z)', text, re.DOTALL)
         recommendation = recm.group(1).strip()[:500] if recm else ''
-        cve_links = soup.find_all('a', href=re.compile(r'cve\.mitre\.org'))
-        cve = '; '.join([a.text.strip() for a in cve_links])
+        cve_in_text = re.findall(r'CVE-\d{4}-\d{4,7}', text)
+        cve = '\n'.join(cve_in_text)
         tags = soup.find_all('a', href=re.compile(r'/en/alerts\.php\?tag='))
         skip_tags = ['PHP','Edge','Google','Chrome','Cisco','Firefox','Mozilla','Windows','Windows Server','Microsoft Office','Apple','iPod','Visual Studio','VMware','Internet Explorer','Microsoft 365 Apps','Android','F5','Acrobat','Acrobat Reader','Adobe Reader','Word','Previous']
         platform_tags = [a.text.strip() for a in tags if a.text.strip() not in skip_tags]
@@ -253,6 +253,8 @@ def crawl_cisco():
                 else: severity = 'Medium'
                 if should_skip(severity): continue
                 cve = adv.get('cve', '')
+                if isinstance(cve, str) and ',' in cve:
+                    cve = '\n'.join(cve.split(','))
                 title = adv.get('title', '')
                 results.append({'Date': pub_date.strftime('%d %B %Y') if pub_date else (published[:10] if published else ''),
                     'Risk level': severity,
@@ -276,17 +278,35 @@ def write_xlsx(results):
     thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
     headers = ['Date', 'Risk level', 'Platform', 'Affected Product', 'Description', 'Workaround', 'Related Link', 'CVE', 'From']
     for col, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col, value=header)
+        cell = ws.cell(row=7, column=col, value=header)
         cell.font = header_font
         cell.fill = header_fill
         cell.alignment = header_align
         cell.border = thin_border
-    for row_idx, item in enumerate(results, 2):
-        for col_idx, key in enumerate(headers, 1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=item.get(key, ''))
+    for row_idx, item in enumerate(results, 8):
+        date_val = item.get('Date', '')
+        if isinstance(date_val, str):
+            try:
+                date_val = datetime.strptime(date_val, '%d %B %Y')
+            except ValueError:
+                try:
+                    date_val = datetime.strptime(date_val[:10], '%Y-%m-%d')
+                except ValueError:
+                    date_val = ''
+        cve_val = item.get('CVE', '')
+        if isinstance(cve_val, str) and '; ' in cve_val:
+            cve_val = '\n'.join(cve_val.split('; '))
+        from_val = item.get('From', '')
+        if from_val == 'GovCERT':
+            from_val = 'GovCert'
+        values = [date_val, item.get('Risk level', ''), item.get('Platform', ''),
+                  item.get('Affected Product', ''), item.get('Description', ''),
+                  item.get('Workaround', ''), item.get('Related Link', ''), cve_val, from_val]
+        for col_idx, value in enumerate(values, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
             cell.border = thin_border
             cell.alignment = Alignment(vertical='top', wrap_text=True)
-    widths = [12, 14, 30, 50, 45, 40, 30, 12, 12]
+    widths = [14, 12, 14, 35, 55, 50, 50, 35, 12]
     for i, width in enumerate(widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
     os.makedirs(OUTPUT_DIR, exist_ok=True)
